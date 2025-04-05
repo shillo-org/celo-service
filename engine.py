@@ -13,6 +13,7 @@ from enum import Enum
 from pygame.locals import *
 import wave
 import subprocess
+import asyncio
 
 from live2d.utils.lipsync import WavHandler
 
@@ -28,6 +29,8 @@ from prompts import BIO_PROMPT, LOOK_AROUND_PROMPT, GENERATE_EXPRESSION_PROMPT
 from speech_generators import generate_speech_elevenlabs, generate_speech_playht, generate_speech_smallest_ai
 
 from background import Background
+from chats.Platform import run_interaction
+
 
 class TTS_Options(Enum):
 
@@ -65,7 +68,7 @@ class Agent:
     current_expression = None
 
 
-    def __init__(self, model_path: str, tts_option: TTS_Options, youtube_key: str, display: tuple = (1920, 1080), background=False, speak=True):
+    def __init__(self, model_path: str, tts_option: TTS_Options, youtube_key: str, display: tuple = (1920, 1080), background=False, speak=True, platform_chat=False):
         
         self.display = display
         self.model_path = model_path
@@ -94,8 +97,12 @@ class Agent:
         }
 
 
+        # Chat integrations
+        self.platform_chat_integration = platform_chat
+
+
         self.ffmpeg_process = None
-        self.setup_ffmpeg(use_audio_file=False)
+        # self.setup_ffmpeg(use_audio_file=False)
 
         # Mutex for audio file access
         self.audio_mutex = threading.Lock()
@@ -248,7 +255,10 @@ class Agent:
                 return temp_filename
                 
         return "output.wav"
-
+    
+    # A wrapper to run async function in a thread
+    def start_async_interaction(self):
+        asyncio.run(run_interaction(os.environ["SERVER_URL"],os.environ["AGENT_NAME"], os.environ["STREAM_ID"]))  # Safe because this is in a new thread
 
     def llm_worker(self):
         """Worker thread to generate LLM content and speech"""
@@ -439,6 +449,13 @@ class Agent:
         if self.speak:
             llm_thread.start()
 
+        platform_chat_thread = threading.Thread(target=self.start_async_interaction)
+        platform_chat_thread.daemon = True
+
+        if self.platform_chat_integration:
+            platform_chat_thread.start()
+
+
         expression_thread = threading.Thread(target=self.look_around_worker)
         expression_thread.daemon = True
         expression_thread.start()
@@ -526,7 +543,7 @@ class Agent:
                             pygame.mixer.music.play()
                             self.wav_handler.Start(self.audio_path)
                             
-                            self.setup_ffmpeg(use_audio_file=True)
+                            # self.setup_ffmpeg(use_audio_file=True)
                             print(f"Main thread: Playing audio {self.audio_path}")
                         except Exception as e:
                             print(f"Main thread: Error playing audio: {e}")
@@ -588,7 +605,7 @@ class Agent:
                 self.audio_done.set()  # Signal that audio is done
                 self.model.SetExpression("normal")
 
-                self.setup_ffmpeg(use_audio_file=False)
+                # self.setup_ffmpeg(use_audio_file=False)
         
 
             self.model.SetOffset(self.dx, self.dy)
@@ -617,7 +634,7 @@ class Agent:
                     # If we encounter too many errors, restart ffmpeg
                     if self.ffmpeg_error_count > 10:
                         print("Too many ffmpeg errors, restarting the process")
-                        self.setup_ffmpeg(use_audio_file=self.audio_in_use)
+                        # self.setup_ffmpeg(use_audio_file=self.audio_in_use)
                         self.ffmpeg_error_count = 0
                     else:
                         self.ffmpeg_error_count += 1
@@ -648,7 +665,19 @@ if __name__ == "__main__":
     os.environ["SMALLEST_API_KEY"] = os.getenv("SMALLEST_API_KEY")
     os.environ["SMALLEST_API_KEY"] = os.getenv("SMALLEST_API_KEY")
     os.environ["YOUTUBE_STREAM_KEY"] = os.getenv("YOUTUBE_STREAM_KEY")
+    os.environ["PLATFORM_CHAT"] = os.getenv("PLATFORM_CHAT")
+
+    os.environ["SERVER_URL"] = os.getenv("SERVER_URL")
+    os.environ["AGENT_NAME"] = os.getenv("AGENT_NAME")
+    os.environ["STREAM_ID"] = os.getenv("STREAM_ID")
 
     tts_option = TTS_Options(os.getenv("TTS_OPTION"))
-    agt = Agent("Resources/miku_pro_jp/runtime/miku_sample_t04.model3.json",tts_option, os.environ["YOUTUBE_STREAM_KEY"], background=True, speak=True)
+    agt = Agent(
+        "Resources/miku_pro_jp/runtime/miku_sample_t04.model3.json",
+        tts_option, 
+        os.environ["YOUTUBE_STREAM_KEY"], 
+        background=False, 
+        speak=False, 
+        platform_chat=bool(os.environ["PLATFORM_CHAT"])
+    )
     agt.run_agent()
