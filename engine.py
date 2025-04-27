@@ -8,7 +8,7 @@ import json
 import random
 import cv2
 import numpy as np
-from  OpenGL.GL import *
+from OpenGL.GL import *
 from enum import Enum
 from pygame.locals import *
 import wave
@@ -26,7 +26,11 @@ from smallest import Smallest
 from elevenlabs import ElevenLabs
 
 from prompts import BIO_PROMPT, LOOK_AROUND_PROMPT, GENERATE_EXPRESSION_PROMPT
-from speech_generators import generate_speech_elevenlabs, generate_speech_playht, generate_speech_smallest_ai
+from speech_generators import (
+    generate_speech_elevenlabs,
+    generate_speech_playht,
+    generate_speech_smallest_ai,
+)
 
 from background import Background
 from chats.Platform import run_interaction
@@ -37,7 +41,6 @@ class TTS_Options(Enum):
     ELEVENLABS = "elevenlabs"
     PLAYHT = "playht"
     SMALLESTAI = "smallestai"
-
 
 
 def capture_frame(width, height):
@@ -55,6 +58,7 @@ def capture_frame(width, height):
         print(f"Error capturing frame: {e}")
         return np.zeros((height, width, 3), dtype=np.uint8)
 
+
 class Agent:
 
     motion_names = {}
@@ -67,14 +71,22 @@ class Agent:
     audio_path = None
     current_expression = None
 
+    def __init__(
+        self,
+        model_path: str,
+        tts_option: TTS_Options,
+        youtube_key: str,
+        display: tuple = (1920, 1080),
+        background=False,
+        speak=True,
+        platform_chat=False,
+    ):
 
-    def __init__(self, model_path: str, tts_option: TTS_Options, youtube_key: str, display: tuple = (1920, 1080), background=False, speak=True, platform_chat=False):
-        
         self.display = display
         self.model_path = model_path
         self.running = True
         self.dx, self.dy = 0.0, 0.0
-        self.look_dx, self.look_dy = display[0]/2, display[1]/2
+        self.look_dx, self.look_dy = display[0] / 2, display[1] / 2
         self.scale = 1.0
         self.lip_sync_multiplier = 10.0  # Increase multiplier for more sensitivity
         self.message_queue = queue.Queue()  # Queue for communication between threads
@@ -87,22 +99,20 @@ class Agent:
         self.speak = speak
         self.youtube_url = f"rtmp://a.rtmp.youtube.com/live2/{youtube_key}"
         self.ffmpeg_error_count = 0
-        
-        self.look = {
-            "left": (0, display[1]/2), 
-            "right": (display[0], display[1]/2),
-            "down": (display[0]/2, 0),
-            "up": (display[0]/2, display[1]),
-            "straight": (display[0]/2,display[1]/2)
-        }
 
+        self.look = {
+            "left": (0, display[1] / 2),
+            "right": (display[0], display[1] / 2),
+            "down": (display[0] / 2, 0),
+            "up": (display[0] / 2, display[1]),
+            "straight": (display[0] / 2, display[1] / 2),
+        }
 
         # Chat integrations
         self.platform_chat_integration = platform_chat
 
-
         self.ffmpeg_process = None
-        # self.setup_ffmpeg(use_audio_file=False)
+        self.setup_ffmpeg(use_audio_file=False)
 
         # Mutex for audio file access
         self.audio_mutex = threading.Lock()
@@ -113,28 +123,24 @@ class Agent:
         pygame.mixer.init()
         live2d.init()
 
-        
-        
-
         self.screen = pygame.display.set_mode(self.display, DOUBLEBUF | OPENGL)
         pygame.display.set_caption("Live2D Viewer")
 
         self.display_bg = background
 
         if self.display_bg:
-            self.background = Background(
-                os.path.join("background.png")
-            )
+            self.background = Background(os.path.join("background.png"))
 
         if live2d.LIVE2D_VERSION == 3:
             live2d.glewInit()
 
         self.model = live2d.LAppModel()
-        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", api_key=os.environ["GEMINI_API_KEY"])
+        self.llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-pro", api_key=os.environ["GEMINI_API_KEY"]
+        )
         self.wav_handler = WavHandler()
         self.model.LoadModelJson(os.path.join(model_path))
         self.model.Resize(*display)
-
 
         # Setup TTS Models
 
@@ -145,30 +151,28 @@ class Agent:
         elif tts_option == TTS_Options.PLAYHT:
             self.client = Client(
                 user_id=os.environ["PLAY_HT_USER_ID"],
-                api_key=os.environ["PLAY_HT_API_KEY"]
+                api_key=os.environ["PLAY_HT_API_KEY"],
             )
         elif tts_option == TTS_Options.SMALLESTAI:
             self.client = Smallest(
                 api_key=os.environ["SMALLEST_API_KEY"],
                 model=os.environ["SMALLEST_MODEL"],
-                voice_id=os.environ["SMALLEST_VOICE_ID"]
+                voice_id=os.environ["SMALLEST_VOICE_ID"],
             )
         else:
             raise ValueError("Invalid tts option given")
 
     def get_audio_duration(self, audio_file):
         """Get the duration of an audio file in seconds"""
-        with wave.open(audio_file, 'rb') as wav_file:
+        with wave.open(audio_file, "rb") as wav_file:
             frames = wav_file.getnframes()
             rate = wav_file.getframerate()
             duration = frames / float(rate)
             return duration
 
-
     def get_expression_names(self):
-        
         "Extract expression names from expression directory"
-        
+
         with open(self.model_path, "r") as file:
             data = json.load(file)
             expressions: list[dict] = data["FileReferences"].get("Expressions", [])
@@ -176,9 +180,8 @@ class Agent:
             self.expression_names = expression_names
 
     def get_motion_names(self):
-
         "Extract motions based on group type, group = idle/moving"
-        
+
         with open(self.model_path, "r") as file:
             data = json.load(file)
             motion_groups: dict = data["FileReferences"]["Motions"]
@@ -187,7 +190,6 @@ class Agent:
                 self.motion_names[group] = motion_count
 
     def get_model_params(self):
-
         "Fetches facial parameters of a model, used for lypsyncing and moving the mouth"
 
         for i in range(self.model.GetParameterCount()):
@@ -210,7 +212,6 @@ class Agent:
                 self.special_params.append(param_id)
                 print(f"Special param: {param_id} (min: {param.min}, max: {param.max})")
 
-
     def generate_speech(self, text):
         # Create a temporary filename to avoid conflicts
         # temp_filename = f"output_temp_{int(time.time())}.wav"
@@ -218,25 +219,20 @@ class Agent:
 
         if self.tts_option == TTS_Options.ELEVENLABS:
             generate_speech_elevenlabs(
-                self.client, 
+                self.client,
                 text,
                 os.environ["ELEVENLABS_VOICE_ID"],
-                os.environ["ELEVENLABS_MODEL_ID"] 
+                os.environ["ELEVENLABS_MODEL_ID"],
             )
         elif self.tts_option == TTS_Options.PLAYHT:
             generate_speech_playht(
-                self.client,
-                text,
-                os.environ["PLAYHT_VOICE_MANIFEST_URL"]
+                self.client, text, os.environ["PLAYHT_VOICE_MANIFEST_URL"]
             )
         elif self.tts_option == TTS_Options.SMALLESTAI:
-            generate_speech_smallest_ai(
-                self.client,
-                text
-            )
+            generate_speech_smallest_ai(self.client, text)
         else:
             raise ValueError("Invalid TTS option passed")
-        
+
         # Acquire mutex before renaming file
         with self.audio_mutex:
             # If there's an old output file, remove it
@@ -245,7 +241,7 @@ class Agent:
                     os.remove("output.wav")
                 except:
                     pass
-            
+
             # Rename temp file to final filename
             try:
                 os.rename(temp_filename, "output.wav")
@@ -253,17 +249,23 @@ class Agent:
                 print(f"Error renaming audio file: {e}")
                 # If rename fails, at least return the temp file
                 return temp_filename
-                
+
         return "output.wav"
-    
+
     # A wrapper to run async function in a thread
     def start_async_interaction(self):
-        asyncio.run(run_interaction(os.environ["SERVER_URL"],os.environ["AGENT_NAME"], os.environ["STREAM_ID"]))  # Safe because this is in a new thread
+        asyncio.run(
+            run_interaction(
+                os.environ["SERVER_URL"],
+                os.environ["AGENT_NAME"],
+                os.environ["STREAM_ID"],
+            )
+        )  # Safe because this is in a new thread
 
     def llm_worker(self):
         """Worker thread to generate LLM content and speech"""
 
-        generate_expression_chain = GENERATE_EXPRESSION_PROMPT | self.llm 
+        generate_expression_chain = GENERATE_EXPRESSION_PROMPT | self.llm
         generate_response_chain = BIO_PROMPT | self.llm
 
         while self.running:
@@ -273,10 +275,12 @@ class Agent:
                     print("LLM thread: Waiting for audio to finish playing...")
                     self.audio_done.wait(timeout=10)  # Wait with timeout
                     self.audio_done.clear()
-                
+
                 print("LLM thread: Generating content...")
 
-                response = generate_response_chain.invoke({"expressions": self.expression_names})
+                response = generate_response_chain.invoke(
+                    {"expressions": self.expression_names}
+                )
                 content = response.content
                 self.prompt_response = content
 
@@ -284,30 +288,34 @@ class Agent:
 
                 # Generate expression
                 print("LLM thread: Generating expression...")
-                response = generate_expression_chain.invoke({"expression_names": self.expression_names, "content": content})
+                response = generate_expression_chain.invoke(
+                    {"expression_names": self.expression_names, "content": content}
+                )
                 expression = response.content
                 print(f"LLM thread: Expression generated: {expression}")
-                
+
                 # Generate speech
                 print("LLM thread: Generating speech...")
                 audio_file = self.generate_speech(content)
                 print(f"LLM thread: Speech generated to {audio_file}")
-                
+
                 # Put message in queue for main thread to process
                 print("LLM thread: Putting message in queue...")
-                self.message_queue.put({
-                    "content": content,
-                    "expression": expression,
-                    "audio_file": audio_file,
-                    "timestamp": time.time()
-                })
+                self.message_queue.put(
+                    {
+                        "content": content,
+                        "expression": expression,
+                        "audio_file": audio_file,
+                        "timestamp": time.time(),
+                    }
+                )
                 print("LLM thread: Message in queue, sleeping for 3 seconds...")
-                
+
                 # Sleep with timeout check to avoid getting stuck
                 start_time = time.time()
                 while time.time() - start_time < 3 and self.running:  # 3 seconds
                     sleep(15)  # Short sleep to allow for cleaner thread exit
-                
+
                 print("LLM thread: Woke up, starting next iteration")
             except Exception as e:
                 print(f"Error in LLM worker: {e}")
@@ -319,13 +327,15 @@ class Agent:
         groups = list(self.motion_names.keys())
 
         while True:
-            
+
             # selected = random.choices(groups)
 
             # self.model.StartRandomMotion(selected[0], 3)
-            self.model.StartMotion("Idle", random.randint(0,self.motion_names["Idle"]),1)
+            self.model.StartMotion(
+                "Idle", random.randint(0, self.motion_names["Idle"]), 1
+            )
 
-            sleep(random.randint(8,20))
+            sleep(random.randint(8, 20))
 
     def look_around_worker(self):
 
@@ -333,19 +343,19 @@ class Agent:
             # print("Look around started")
             # response = self.llm.invoke(f"""
             #     Given {self.display} which is size of the total screen,
-            #     Now in center of the screen we have a Animated character 
+            #     Now in center of the screen we have a Animated character
             #     which is talking and needs to look around.
 
-            #     Your task is to generate a point where it will look currently 
+            #     Your task is to generate a point where it will look currently
 
             #     eg: [100,200]
             #     this examples shows the character will be looking at this point
             #     generate this head movement based on given content it will be speaking.
-                
-            #     Don't generate random points currently the head is looking at 
-            #     [{self.look_dx}, {self.look_dy}], so generate new point based on this and 
+
+            #     Don't generate random points currently the head is looking at
+            #     [{self.look_dx}, {self.look_dy}], so generate new point based on this and
             #     it should not look random.
-                
+
             #     if the Content doesnt make sense then generate what you think is good.
             #     your response should not not be a program and no comments
 
@@ -363,75 +373,92 @@ class Agent:
             #     print(e)
             #     pass
 
-            choices = ["straight"] * 6 + ["left", "right", "up", "down"]  # 60% straight, 10% others
+            choices = ["straight"] * 6 + [
+                "left",
+                "right",
+                "up",
+                "down",
+            ]  # 60% straight, 10% others
             selected = random.choice(choices)
             self.look_dx, self.look_dy = self.look[selected]
             print("Look selected: ", selected)
             sleep(5)
 
-        
     def setup_ffmpeg(self, use_audio_file=False):
         """Sets up the ffmpeg process with either silent audio or an audio file"""
-        
+
         print("Initializing FFMPeg")
         # Kill the current ffmpeg process if it exists
-        if hasattr(self, 'ffmpeg_process') and self.ffmpeg_process:
+        if hasattr(self, "ffmpeg_process") and self.ffmpeg_process:
             self.ffmpeg_process.terminate()
             print("FFMPeg Terminated")
             try:
                 self.ffmpeg_process.wait(timeout=2)
             except:
                 self.ffmpeg_process.kill()
-        
+
         # Build the ffmpeg command
         ffmpeg_cmd = [
-            'ffmpeg',
-            '-y',
-            
+            "ffmpeg",
+            "-y",
             # Video Input (from named pipe)
-            '-f', 'rawvideo',
-            '-pix_fmt', 'bgr24',
-            '-s', f'{self.display[0]}x{self.display[1]}',
-            '-r', str(self.fps),
-            '-i', "-",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "-s",
+            f"{self.display[0]}x{self.display[1]}",
+            "-r",
+            str(self.fps),
+            "-i",
+            "-",
         ]
-        
+
         # Add audio input based on whether we're using an audio file
         if use_audio_file and os.path.exists("output.wav"):
             # Audio input from WAV file
-            ffmpeg_cmd.extend(['-i', "output.wav"])
+            ffmpeg_cmd.extend(["-i", "output.wav"])
         else:
             # Silent audio input
-            ffmpeg_cmd.extend([
-                '-f', 'lavfi',
-                '-i', 'anullsrc=r=44100:cl=stereo'
-            ])
-        
+            ffmpeg_cmd.extend(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"])
+
         # Add encoding settings and output
-        ffmpeg_cmd.extend([
-            # Video Encoding
-            '-c:v', 'libx264',
-            '-pix_fmt', 'yuv420p',
-            '-preset', 'ultrafast',
-            '-tune', 'zerolatency',
-            '-b:v', '2500k',
-            '-maxrate', '2500k',
-            '-bufsize', '5000k',
-            '-g', str(self.fps * 2),
-            
-            # Audio Encoding
-            '-c:a', 'aac',
-            '-b:a', '128k',
-            
-            # Output Format (FLV for YouTube)
-            '-f', 'flv',
-            self.youtube_url
-        ])
-        
+        ffmpeg_cmd.extend(
+            [
+                # Video Encoding
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-preset",
+                "ultrafast",
+                "-tune",
+                "zerolatency",
+                "-b:v",
+                "2500k",
+                "-maxrate",
+                "2500k",
+                "-bufsize",
+                "5000k",
+                "-g",
+                str(self.fps * 2),
+                # Audio Encoding
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                # Output Format (FLV for YouTube)
+                "-f",
+                "flv",
+                self.youtube_url,
+            ]
+        )
+
         # Start the ffmpeg process
-        print(f"Starting ffmpeg process: {'with audio file' if use_audio_file else 'with silent audio'}")
+        print(
+            f"Starting ffmpeg process: {'with audio file' if use_audio_file else 'with silent audio'}"
+        )
         self.ffmpeg_process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
-        
 
     def run_agent(self):
         """Main method that runs everything"""
@@ -440,11 +467,13 @@ class Agent:
         self.get_expression_names()
         self.get_motion_names()
         self.get_model_params()
-        
+
         # Start LLM thread
         self.running = True
         llm_thread = threading.Thread(target=self.llm_worker)
-        llm_thread.daemon = True  # Make thread daemon so it exits when main thread exits
+        llm_thread.daemon = (
+            True  # Make thread daemon so it exits when main thread exits
+        )
 
         if self.speak:
             llm_thread.start()
@@ -455,7 +484,6 @@ class Agent:
         if self.platform_chat_integration:
             platform_chat_thread.start()
 
-
         expression_thread = threading.Thread(target=self.look_around_worker)
         expression_thread.daemon = True
         expression_thread.start()
@@ -463,10 +491,10 @@ class Agent:
         motion_thread = threading.Thread(target=self.idle_motion_worker)
         motion_thread.daemon = True
         motion_thread.start()
-        
+
         print("Main thread: LLM worker thread started")
         print("Main thread: Starting video loop")
-        
+
         # Run the main loop in the main thread
         try:
             self.run_video()
@@ -476,31 +504,32 @@ class Agent:
             # Cleanup
             print("Main thread: Shutting down")
             self.running = False
-            
+
             # Signal any waiting threads
             self.audio_done.set()
-            
+
             # Wait for worker thread to finish any current work (with timeout)
             print("Main thread: Waiting for worker thread to exit")
             start_time = time.time()
-            while llm_thread.is_alive() and time.time() - start_time < 5:  # 5 second timeout
+            while (
+                llm_thread.is_alive() and time.time() - start_time < 5
+            ):  # 5 second timeout
                 sleep(0.1)
 
-            while expression_thread.is_alive() and time.time() - start_time < 5:  # 5 second timeout
+            while (
+                expression_thread.is_alive() and time.time() - start_time < 5
+            ):  # 5 second timeout
                 sleep(0.1)
 
-            while motion_thread.is_alive() and time.time() - start_time < 5:  # 5 second timeout
+            while (
+                motion_thread.is_alive() and time.time() - start_time < 5
+            ):  # 5 second timeout
                 sleep(0.1)
-                
+
             print("Main thread: Cleaning up PyGame and Live2D")
             pygame.quit()
             live2d.dispose()
             print("Main thread: Shutdown complete")
-
-
-
-        
-
 
     def run_video(self):
         """Main video loop - must run in main thread"""
@@ -516,7 +545,6 @@ class Agent:
                 if event.type == pygame.QUIT:
                     self.running = False
 
-
                 # if event.type == pygame.MOUSEMOTION:
                 #     self.model.Drag(*pygame.mouse.get_pos())
 
@@ -525,13 +553,15 @@ class Agent:
                 if not self.message_queue.empty() and not self.audio_in_use:
                     print("Main thread: Found message in queue")
                     message = self.message_queue.get_nowait()
-                    
+
                     # Apply expression and play audio
                     self.current_expression = message["expression"]
                     self.audio_path = message["audio_file"]
-                    
-                    print(f"Main thread: Processing message with expression: {self.current_expression}")
-                    
+
+                    print(
+                        f"Main thread: Processing message with expression: {self.current_expression}"
+                    )
+
                     # Handle in main thread
                     self.model.SetExpression(self.current_expression)
 
@@ -542,13 +572,13 @@ class Agent:
                             self.audio_in_use = True
                             pygame.mixer.music.play()
                             self.wav_handler.Start(self.audio_path)
-                            
-                            # self.setup_ffmpeg(use_audio_file=True)
+
+                            self.setup_ffmpeg(use_audio_file=True)
                             print(f"Main thread: Playing audio {self.audio_path}")
                         except Exception as e:
                             print(f"Main thread: Error playing audio: {e}")
                             self.audio_in_use = False
-                    
+
             except queue.Empty:
                 pass
             except Exception as e:
@@ -564,39 +594,59 @@ class Agent:
                 for param_id in self.mouth_params:
                     try:
                         if "openy" in param_id.lower():
-                            self.model.AddParameterValue(param_id, rms * self.lip_sync_multiplier)
+                            self.model.SetParameterValue(
+                                param_id, rms * self.lip_sync_multiplier
+                            )
                         elif "form" in param_id.lower():
-                            self.model.AddParameterValue(param_id, rms * 0.5)
+                            self.model.SetParameterValue(param_id, rms * 0.5)
                     except Exception as e:
                         pass
 
                 if self.vowel_params:
                     try:
                         if "ParamA" in self.vowel_params:
-                            self.model.AddParameterValue(
+                            self.model.SetParameterValue(
                                 "ParamA", rms * 3.0 if rms > 0.05 else 0
                             )
                         if "ParamO" in self.vowel_params:
-                            self.model.AddParameterValue(
+                            self.model.SetParameterValue(
                                 "ParamO", rms * 2.0 if 0.04 < rms < 0.15 else 0
                             )
                         if "ParamI" in self.vowel_params:
-                            self.model.AddParameterValue(
+                            self.model.SetParameterValue(
                                 "ParamI", rms * 1.0 if rms < 0.06 else 0
                             )
                         if "ParamU" in self.vowel_params:
-                            self.model.AddParameterValue(
+                            self.model.SetParameterValue(
                                 "ParamU", rms * 1.5 if 0.03 < rms < 0.1 else 0
                             )
                         if "ParamE" in self.vowel_params:
-                            self.model.AddParameterValue(
+                            self.model.SetParameterValue(
                                 "ParamE", rms * 1.0 if 0.03 < rms < 0.08 else 0
                             )
                     except Exception as e:
                         pass
 
                 print(f"RMS: {rms:.3f}")
-            
+            else:
+                # Reset mouth when not speaking
+                for param_id in self.mouth_params:
+                    try:
+                        if "openy" in param_id.lower():
+                            self.model.SetParameterValue(param_id, 0.0)
+                        elif "form" in param_id.lower():
+                            self.model.SetParameterValue(param_id, 0.0)
+                    except Exception as e:
+                        pass
+
+                # Reset vowel parameters when not speaking
+                if self.vowel_params:
+                    try:
+                        for param_id in self.vowel_params:
+                            self.model.SetParameterValue(param_id, 0.0)
+                    except Exception as e:
+                        pass
+
             # Check if audio finished playing
             if self.audio_in_use and not pygame.mixer.music.get_busy():
                 # Audio finished playing
@@ -605,17 +655,16 @@ class Agent:
                 self.audio_done.set()  # Signal that audio is done
                 self.model.SetExpression("normal")
 
-                # self.setup_ffmpeg(use_audio_file=False)
-        
+                self.setup_ffmpeg(use_audio_file=False)
 
             self.model.SetOffset(self.dx, self.dy)
             self.model.SetScale(self.scale)
             # self.model.HitPart(100, 200, False)
             self.model.Drag(self.look_dx, self.look_dy)
-            
+
             # Change alpha to 1.0 instead of 0.0 (not transparent)
             live2d.clearBuffer(0.0, 0.0, 0.0, 1.0)
-            
+
             if self.display_bg:
                 self.background.Draw()
                 self.model.Update()
@@ -634,7 +683,7 @@ class Agent:
                     # If we encounter too many errors, restart ffmpeg
                     if self.ffmpeg_error_count > 10:
                         print("Too many ffmpeg errors, restarting the process")
-                        # self.setup_ffmpeg(use_audio_file=self.audio_in_use)
+                        self.setup_ffmpeg(use_audio_file=self.audio_in_use)
                         self.ffmpeg_error_count = 0
                     else:
                         self.ffmpeg_error_count += 1
@@ -643,10 +692,9 @@ class Agent:
             frame_end = time.time()
             frame_time = frame_end - frame_start
             target_frame_time = 1.0 / self.fps
-            
+
             if frame_time < target_frame_time:
                 time.sleep(target_frame_time - frame_time)
-
 
             clock.tick(60)
 
@@ -655,7 +703,7 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv()
-    
+
     os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
     os.environ["ELEVENLABS_API_KEY"] = os.getenv("ELEVENLABS_API_KEY")
     os.environ["PLAY_HT_USER_ID"] = os.getenv("PLAY_HT_USER_ID")
@@ -673,11 +721,11 @@ if __name__ == "__main__":
 
     tts_option = TTS_Options(os.getenv("TTS_OPTION"))
     agt = Agent(
-        "Resources/miku_pro_jp/runtime/miku_sample_t04.model3.json",
-        tts_option, 
-        os.environ["YOUTUBE_STREAM_KEY"], 
-        background=False, 
-        speak=False, 
-        platform_chat=bool(os.environ["PLATFORM_CHAT"])
+        "Resources/Mao/Mao.model3.json",
+        tts_option,
+        os.environ["YOUTUBE_STREAM_KEY"],
+        background=True,
+        speak=True,
+        platform_chat=bool(os.environ["PLATFORM_CHAT"]),
     )
     agt.run_agent()
