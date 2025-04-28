@@ -75,7 +75,7 @@ class Agent:
         self,
         model_path: str,
         tts_option: TTS_Options,
-        youtube_key: str,
+        rtmp_url: str,
         display: tuple = (1920, 1080),
         background=False,
         speak=True,
@@ -97,7 +97,7 @@ class Agent:
         self.frame_count = 300
         self.tts_option = tts_option
         self.speak = speak
-        self.youtube_url = f"rtmp://a.rtmp.youtube.com/live2/{youtube_key}"
+        self.rtmp_url = rtmp_url
         self.ffmpeg_error_count = 0
 
         self.look = {
@@ -450,7 +450,7 @@ class Agent:
                 # Output Format (FLV for YouTube)
                 "-f",
                 "flv",
-                self.youtube_url,
+                self.rtmp_url,
             ]
         )
 
@@ -712,7 +712,7 @@ if __name__ == "__main__":
 
     os.environ["SMALLEST_API_KEY"] = os.getenv("SMALLEST_API_KEY")
     os.environ["SMALLEST_API_KEY"] = os.getenv("SMALLEST_API_KEY")
-    os.environ["YOUTUBE_STREAM_KEY"] = os.getenv("YOUTUBE_STREAM_KEY")
+    os.environ["RTMP_URL"] = os.getenv("RTMP_URL")
     os.environ["PLATFORM_CHAT"] = os.getenv("PLATFORM_CHAT")
 
     os.environ["SERVER_URL"] = os.getenv("SERVER_URL")
@@ -723,8 +723,8 @@ if __name__ == "__main__":
     agt = Agent(
         "Resources/Mao/Mao.model3.json",
         tts_option,
-        os.environ["YOUTUBE_STREAM_KEY"],
-        background=True,
+        os.environ["RTMP_URL"],
+        background=False,
         speak=True,
         platform_chat=bool(os.environ["PLATFORM_CHAT"]),
     )
